@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>OSM + Google API Web Map</title>
+		
+		<!-- Bootstrap Core CSS -->
+		<link href="{{ url_for('static', filename='bootstrap/css/bootstrap.css') }}" rel="stylesheet" type="text/css">
+        <style>
+            html, body, #map {
+                height: 100%;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+				font-family: Product Sans, Relish, Helvetica, Arial, sans-serif; 
+            }
+			div#googlenote {
+			  color: black;
+			  padding: 0px;
+			  z-index: 1000;
+			  position: absolute;
+			  left: 74px;
+			  bottom: 4px;
+			  opacity: 0.6;
+			  filter: alpha(opacity=60);
+			  text-shadow: -2px 0 #FFF, 0 2px #FFF, 2px 0 #FFF, 0 -2px #FFF;
+			  font-family: Product Sans, Relish, Helvetica, Arial, sans-serif; 
+			}
+			div#osmcredits {
+			  padding: 0px;
+			  z-index: 1000;
+			  position: absolute;
+			  left: 5px;
+			  bottom: 28px;
+			  cursor: pointer;
+			  max-width:380px;
+			  font-family: Product Sans, Relish, Helvetica, Arial, sans-serif; 
+			}
+			div#menu {
+				z-index: 1000;
+				background-color: white;
+				top: 5px;
+				width: 300px;
+				padding: 0px;
+				position: absolute;
+				left: 5px;
+				height: 90%;
+				overflow-y: scroll;
+				font-family: Product Sans, Relish, Helvetica, Arial, sans-serif; 
+			}
+			div.floating-panel {
+				position: absolute;
+				top: 5px;
+				background-color: #fff;
+				z-index: 5;
+				padding: 5px;
+				border: 1px solid #999;
+				text-align: center;
+				line-height: 25px;
+				padding-left: 8px;
+			}
+			#legend {
+				font-family: Arial, sans-serif;
+				background: #fff;
+				padding: 10px;
+				margin: 10px;
+				border: 3px solid #000;
+			}
+			#legend h3 {
+				margin-top: 0;
+			}
+			#legend img {
+				vertical-align: middle;
+			}
+        </style> 
+    </head>
+    <body>
+		<!-- import jquery -->
+		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.0/jquery.min.js"></script>
+		
+		<!-- toggle buttons -->
+		<div class="floating-panel" style="left: 20%">
+			<button onclick="toggleList()">Toggle List of Trips</button>
+		</div>
+		<div class="floating-panel" id="latlng" style="left: 30%">
+			Lat Lng
+		</div>
+        <div class="floating-panel" style="left: 40%">
+			<button onclick="toggleHeatmap()">Toggle AADT Heatmap</button>
+		</div>
+		<div class="floating-panel" style="left: 52%">
+			<button onclick="toggleAcc()">Toggle Accuracy</button>
+		</div>
+		<div class="floating-panel" style="left: 62%">
+			<button onclick="toggleRack()">Toggle Racks</button>
+		</div>
+		<div class="floating-panel" style="left: 70%">
+			<button onclick="toggleMapMatch()" id="mm_button">Toggle Map Matching</button>
+		</div>
+		
+		<!-- div containing map -->
+		<div id="map" style="float: left;"></div>
+		
+		<!-- trip selection menu -->
+		<div id="menu" class="panel panel-default">
+			<table class="table table-striped table-bordered table-hover">
+				<tbody>
+					{% for trip in trips %}
+					<tr>
+						<th style= {% if trip[1] == trip_id %} "background-color: #5AB4FF" {% else %} "" {% endif %}>
+							<a href="/{{ trip[1] }}" style="color:inherit;">
+							Trip {{ trip[1] }}: from {{ trip[2] }} to {{ trip[3] }}.
+							</a>
+						</th>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+        <div id="googlenote">maps display</div>
+		<div id="osmcredits"><b>OpenStreetMap</b> map tiles</div>
+		
+		<!-- legend -->
+		<div id="legend"><h3>Legend</h3>
+			<div><img src="{{ url_for('static', filename='legend/blue_circle.png') }}"> GPS point</div>
+			<div><img src="{{ url_for('static', filename='legend/green_line.png') }}"> Bike trail</div>
+			<div><img src="{{ url_for('static', filename='legend/parking_lot.png') }}"> Bike rack</div>
+			<div><img src="{{ url_for('static', filename='legend/red_line.png') }}"> Map matched path</div>
+			<div><img src="{{ url_for('static', filename='legend/yellow_circle.png') }}"> Accuracy radius</div>
+		</div>
+		
+        <!-- bring in the google maps library -->
+        <script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?v=3.exp&libraries=visualization"></script>
+
+        <script type="text/javascript">
+			// set scrollbar position to match currently selected trip
+			$("div#menu").scrollTop(36.8 * {{trip_fid}} - 36.8); //1542, 1167; 721, 281; 721, 345, 3.2
+            
+			//Google maps API initialisation
+            var element = document.getElementById("map");
+ 
+            var map = new google.maps.Map(element, {
+                center: new google.maps.LatLng(40.1164, -88.2434),
+                zoom: 12,
+                mapTypeId: "OSM",
+                mapTypeControl: false,
+                streetViewControl: false
+            });
+			
+var myCenter=new google.maps.LatLng(40.1164, -88.2434);
+var latlng_marker;
+
+    latlng_marker = new google.maps.Marker({
+        position:myCenter,
+        draggable:true,
+    });
+
+    latlng_marker.setMap(map);
+
+    latlng_marker.addListener("drag", function(){
+        document.getElementById("latlng").innerHTML=latlng_marker.position.toUrlValue();
+    });
+			
+			var legend = document.getElementById('legend');
+			map.controls[google.maps.ControlPosition.RIGHT_TOP].push(legend);
+ 
+            //Define OSM map type pointing at the OpenStreetMap tile server
+            map.mapTypes.set("OSM", new google.maps.ImageMapType({
+                getTileUrl: function(coord, zoom) {
+                    // "Wrap" x (logitude) at 180th meridian properly
+                    // NB: Don't touch coord.x because coord param is by reference, and changing its x property breakes something in Google's lib 
+                    var tilesPerGlobe = 1 << zoom;
+                    var x = coord.x % tilesPerGlobe;
+                    if (x < 0) {
+                        x = tilesPerGlobe+x;
+                    }
+                    // Wrap y (latitude) in a like manner if you want to enable vertical infinite scroll
+
+                    return "http://tile.openstreetmap.org/" + zoom + "/" + x + "/" + coord.y + ".png";
+                },
+                tileSize: new google.maps.Size(256, 256),
+                name: "OpenStreetMap",
+                maxZoom: 18
+            }));
+			
+			// symbol displayed at the end of a line
+			var lineSymbol = {
+				path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+				scale: 2
+			};
+			
+			// symbol for non-directional lines
+			var circleSymbol = {
+				path: google.maps.SymbolPath.CIRCLE,
+				scale: 2
+			};
+			
+			// drawing functions
+			var newPt = function(lat, lng) {
+				return new google.maps.Marker({
+					position: new google.maps.LatLng(lat, lng),
+					icon: {
+						path: google.maps.SymbolPath.CIRCLE,
+						scale: 4,
+						strokeColor: '#00F',
+						fillColor: '#00F'
+					},
+					draggable: false,
+					map: map
+				});
+			};
+			var newLine = function(lat1, lng1, lat2, lng2, color, arrow = true, invisible = false) {
+				var icon = arrow ? lineSymbol : circleSymbol; 
+				return new google.maps.Polyline({
+					path: [{lat: lat1, lng: lng1}, {lat: lat2, lng: lng2}],
+					icons: [{
+						icon: icon,
+						offset: '100%',
+						strokeColor: color,
+						fillColor: color
+					}],
+					strokeColor: color,
+					fillColor: color,
+					scale: 0.5,
+					map: (invisible == false ? map : null)
+				});
+			};
+			var newInfo = function(marker, time, acc, vel) {
+				var infowindow = new google.maps.InfoWindow({
+					content: '<div><p>Time = ' + time + '</p>' + 
+					         '<p>Velocity = ' + vel + ' m/s</p>' +
+							 '<p>Accuracy = ' + acc + '</p></div>'
+				});
+				marker.addListener('click', function() {
+					infowindow.open(map, marker);
+				});
+			};
+			var newCircle = function(lat, lng, radius) {
+				return new google.maps.Circle({
+					strokeOpacity: 0.0,
+					fillColor: '#FFFF00',
+					fillOpacity: 0.5,
+					center: {lat: lat, lng: lng}, 
+					map: map,
+					radius: radius
+				});
+			}
+			
+			// draw nearby bike trails, coordinates are in (lng, lat) order
+			{% for trail in trails %}
+				{% for line in trail[2] %}
+					var marker = newLine({{line[0][1]}}, {{line[0][0]}}, {{line[1][1]}}, {{line[1][0]}}, '#0F0', false);
+				{% endfor %}
+			{% endfor %}
+			
+			var over = {};
+			// start timer, at end of timer focus on marker
+			var begin_focus = function(marker_id) {
+				over[marker_id] = true;
+				// get marker corresponding to marker_id
+				var this_marker = null;
+				for (var i = 0; i < pt_lst.length; i++) {
+					if (marker_id == pt_lst[i][0]) {
+						this_marker = pt_lst[i][1];
+					}
+				}
+				// get the next line
+				var next_line = null;
+				for (var i = 0; i < pt_lst.length; i++) {
+					if (pt_lst[i][3] != null) {
+						var k = pt_lst[i][3].getPath().getAt(0);
+						var e = 0.000001;
+						if (Math.abs(k.lat() - this_marker.getPosition().lat()) < e && Math.abs(k.lng() - this_marker.getPosition().lng()) < e) {
+							next_line_id = pt_lst[i][0];
+						}
+					}
+				}
+				
+				// lower opacity of all markers that are not currently hovered over
+				function focus() {
+					for (var i = 0; i < pt_lst.length; i++) {
+						if (marker_id != pt_lst[i][0]) {
+							pt_lst[i][1].setOpacity(0.3);
+							pt_lst[i][2].setVisible(false);
+							if (pt_lst[i][3] != null && pt_lst[i][0] != next_line_id)
+								pt_lst[i][3].setOptions({strokeOpacity: 0.3});
+						}
+					}
+					clearInterval(timer);
+				}
+				
+				// set timer to focus on the currently hovered over marker in approx. 1 second
+				var timer = setInterval(focus, 1000);
+				
+				if (this_marker != null) {
+					// set up event listener to stop focusing on the current marker, 
+					// when the user mouses away from the marker
+					var out_listener = this_marker.addListener('mouseout', function() {
+						for (var i = 0; i < pt_lst.length; i++) {
+							pt_lst[i][1].setOpacity(1.0);
+							pt_lst[i][2].setVisible(true);
+							if (pt_lst[i][3] != null)
+								pt_lst[i][3].setOptions({strokeOpacity: 1.0});
+							if (next_line != null)
+								next_line.setOptions({strokeOpacity: 1.0});
+						}
+						clearInterval(timer); 
+						google.maps.event.removeListener(out_listener);
+						over[marker_id] = false;
+					});
+				}
+			}
+			
+			// draw gps point data, and accuracy radius and connect them by darkened lines
+			var pt_lst = [], line = null;
+			{% for pt in points %}
+				var marker = newPt({{pt[1]}}, {{pt[2]}});
+				newInfo(marker, '{{pt[5]}}', {{pt[7]}}, {{pt[8]}});
+				var acc = newCircle({{pt[1]}}, {{pt[2]}}, {{pt[7]}});
+				{% if pt[3] != None and pt[4] != None %}
+					var line = newLine({{pt[3]}}, {{pt[4]}}, {{pt[1]}}, {{pt[2]}}, '#000');
+				{% endif %}
+				pt_lst.push([{{pt[0]}}, marker, acc, line]);
+				marker.addListener('mouseover', function() { begin_focus({{pt[0]}}); });
+			{% endfor %}
+			
+			// draw map matched paths, coordinates are in (lat, lng) order
+			var mm_lst = [];
+			{% for paths in all_paths %}
+				var mm_lst_ = [];
+				{% for line in paths %}
+					mm_lst_.push(newLine({{line[0][1]}}, {{line[0][0]}}, {{line[1][1]}}, {{line[1][0]}}, '#F00'{% if paths != all_paths[0] %}, true, invisible = true{% endif %}));
+				{% endfor %}
+				mm_lst.push(mm_lst_);
+			{% endfor %}
+			
+			// traffic heat map
+			var heatmapData = [
+			{% for a in aadt %}
+				{location: new google.maps.LatLng({{a[0]}}, {{a[1]}}), weight: {{a[2]}}},
+			{% endfor %}
+			];
+			var heatmap = new google.maps.visualization.HeatmapLayer({ data: heatmapData });
+			
+			// function to make trip menu disappear and reappear
+			var list_on = true;
+			function toggleList() {
+				if (list_on) {
+					$("div#menu").animate({height:"0%"}, 200);
+					list_on  = false;
+				} else {
+					$("div#menu").animate({height:"90%"}, 200);
+					list_on  = true;
+				}
+			}
+			
+			function toggleHeatmap() {
+				heatmap.setMap(heatmap.getMap() ? null : map);
+			}
+			
+			function toggleAcc() {
+				for (var i = 0; i < pt_lst.length; i++) {
+					pt_lst[i][2].setMap(pt_lst[i][2].map ? null : map);
+				}
+			}
+			
+			function toggleRack() {
+				for (var i = 0; i < rack_lst.length; i++) {
+					rack_lst[i].setMap(rack_lst[i].map ? null : map);
+				}
+			}
+			
+			// change "toggle map match button" to reflect currently selected algorithm
+			var cur_type = 0;
+			var mm_types = [{% for mt in mm_types %} "{{mt}}", {% endfor %}];
+			function set_mm_button_text() {
+				if (0 <= cur_type && cur_type < mm_types.length)
+					document.getElementById("mm_button").innerHTML = "Toggle Map Matching [" + mm_types[cur_type] + "]";
+			} set_mm_button_text();
+			
+			// cycle to the next map matching algorithm type, display corresponding path
+			function toggleMapMatch() {
+				if (0 <= cur_type && cur_type < mm_types.length) {
+					for (var i = 0; i < mm_lst[cur_type].length; i++) {
+						mm_lst[cur_type][i].setMap(null);
+					}
+					cur_type = (cur_type + 1) % mm_types.length;
+					set_mm_button_text()
+					for (var i = 0; i < mm_lst[cur_type].length; i++) {
+						mm_lst[cur_type][i].setMap(map);
+					}
+				}
+			}
+			
+			// bike racks
+			function newRack(lat, lng) {
+				return new google.maps.Marker({
+					position: {lat: lat, lng: lng},
+					icon: "{{ url_for('static', filename='legend/parking_lot.png') }}", 
+					      //"https://maps.google.com/mapfiles/kml/shapes/parking_lot_maps.png",
+					map: null
+				});
+			}
+			var rack_lst = [];
+			{% for rack in racks %}
+				rack_lst.push(newRack({{rack[0]}}, {{rack[1]}}));
+			{% endfor %}
+        </script>
+    </body>
+</html>
