@@ -28,29 +28,34 @@ aadt_data = [(int(log(feat["properties"]["AADT"] + 1)),
              for feat in street_data["features"]]
 del street_data
 
-# names of different map matching algorithms
-map_match_types = ["clean_route_latlog",
-                   "dijkstra_route_latlog",
-                   "speed_route_latlog"]
+# names of alternative routes
+alt_route_types = ["clean_data",
+                   "shortest_route",
+                   "second_shortest_route",
+                   "minimum_intersections_route",
+                   "speed_route"]
 
 # populate the data structure, such that
-# map_match_data[map_match_type][trip_id] = list of coordinates of paths
-map_match_data = []
-for match_type in map_match_types:
-    match_json = read_json("static/data/" + match_type + ".geojson")
+# map_match_data[route_type][trip_id] = list of coordinates of paths
+route_data = []
+for route_type in alt_route_types:
+    route_json = read_json("static/data/" + route_type + ".geojson")
     
-    match_data = []
-    for feat in match_json["features"]:
-        trip_id = int(feat["properties"]["TRIP_ID"])
-        coords  = feat["geometry"]["coordinates"]
+    alt_route_data = []
+    for features in route_json["features"]:
+        trip_id = int(features["properties"]["TRIP_ID"])
+        coords  = features["geometry"]["coordinates"]
 
         # ensure that coordinates are in triply nested format
-        if feat["geometry"]["type"] == "LineString":
+        if features["geometry"]["type"] == "LineString":
             coords = [coords]
+
+        # extend size of list, so that list is at least trip_id + 1 long
+        size_difference = trip_id - len(alt_route_data) + 1
+        alt_route_data.extend([None for _ in range(size_difference)])
         
-        match_data.extend([None for _ in range(trip_id - len(match_data) + 1)])
-        match_data[trip_id] = coords
-    map_match_data.append(match_data)
+        alt_route_data[trip_id] = coords
+    route_data.append(alt_route_data)
 
 # mapping from location type ID to the name of the location type
 location_types = ["?", "Home", "Work", "K-12 School",
@@ -63,7 +68,6 @@ def main(trip_id):
     # load trips and convert the destination types
     trips = read_tsv("static/data/trip.csv", header = True)
 
-    trip_id = str(trip_id)
     trip_fid = 0
     for i, trip in list(enumerate(trips)):
         # interpret the origin / destination type codes
@@ -74,19 +78,19 @@ def main(trip_id):
         if trip[1] == str(trip_id):
             trip_fid = trip[0]
 
-    # load map-matched path data for all map matching algorithm variants
+    # load route data for all alternative route variants
     all_paths = []
     all_types = []
-    if trip_id != None and trip_id != "None":
-        for match_type, match_data in zip(map_match_types, map_match_data):
-            path_data = match_data[int(trip_id)]
-            if path_data != None:
+    if trip_id != None:
+        for route_type, alt_route_data in zip(alt_route_types, route_data):
+            coords = alt_route_data[int(trip_id)]
+            if coords != None:
                 # flatten and combine data, so that it represents line segments
-                paths = [line for seg in path_data for line in seg]
+                paths = [line for path in coords for line in path]
                 paths = list(zip(paths, paths[1:]))
                 
                 all_paths.append(paths)
-                all_types.append(match_type)
+                all_types.append(route_type)
 
     # process point data
     points = []
@@ -154,7 +158,7 @@ def main(trip_id):
                     trip_aadt.append((mix(coord_1[1], coord_2[1], i / 10.0),
                                       mix(coord_1[0], coord_2[0], i / 10.0), a))
     
-    return render_template("web_map.html", trips = trips, trip_id = trip_id,
+    return render_template("web_map.html", trips = trips, trip_id=str(trip_id),
                            trip_fid = trip_fid, points = points,
                            all_paths = all_paths, mm_types = all_types,
                            trails = trails, aadt = trip_aadt, racks = racks)
